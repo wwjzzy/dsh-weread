@@ -1,0 +1,5 @@
+- insert:
+    - id: weread-shelf
+      name: dsh-weread
+      config:
+        cookie: ''
