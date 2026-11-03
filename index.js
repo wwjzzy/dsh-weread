@@ -16,6 +16,7 @@ export const inject = ['tools']
 
 export const Config = Schema.object({
   cookie: Schema.string().default('').description('weread.qq.com Cookie header; leave empty to use QR login or demo mode'),
+  syncProgress: Schema.boolean().default(false).description('Write reading progress and time back to WeRead'),
 })
 
 /**

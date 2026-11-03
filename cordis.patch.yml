@@ -3,3 +3,4 @@
       name: dsh-weread
       config:
         cookie: ''
+        syncProgress: false

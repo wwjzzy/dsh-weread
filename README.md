@@ -6,9 +6,12 @@ WeChat Reading (WeRead) right-sidebar bookshelf and chapter reader for [DeepSeek
 
 ## Features
 
-- Right-sidebar panel: bookshelf, store search, resume reading
-- Sign in with WeChat QR or by pasting a `weread.qq.com` Cookie
-- In-panel chapter reader (font size, TOC, keyboard / side click)
+- Right-sidebar panel: bookshelf, store search, prominent Continue card
+- Shelf filters (All / Reading / Finished) with progress and reading-time labels
+- Cover-first bookshelf, with a list view toggle
+- Merges local vs cloud progress by recency; syncs progress and reading time back to WeRead
+- Sign in with WeChat QR or Cookie; expired sessions offer a one-tap re-login
+- Reader dock with chapter progress and TOC; ←→ / Space / side-click paging
 - Demo book when signed out
 - Agent tools (registered when the names are free): `weread_shelf`, `weread_search`, `weread_book`, `weread_chapter`
 
@@ -29,8 +32,11 @@ Restart Harness after install, then open the **WeRead** tab in the right sidebar
 Optional Cordis config (also editable in the panel):
 
 ```yaml
-cookie: ''   # weread.qq.com Cookie header; leave empty to use QR login or demo mode
+cookie: ''            # weread.qq.com Cookie header; leave empty to use QR login or demo mode
+syncProgress: false   # write chapter progress and reading time back to WeRead
 ```
+
+Turn on **进度回写** in Settings to sync while you read. Reports use the same signed `POST /web/book/read` body as the official web reader, with idle detection so an open tab is not counted as reading time.
 
 ## License
 

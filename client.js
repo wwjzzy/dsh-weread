@@ -92,6 +92,21 @@ window.__ModuleLoader__.load({
       '.wr-catalogItem[data-active="true"]{color:var(--dsw-alias-brand-primary)}',
       '.wr-qr{width:180px;height:180px;margin:8px auto;display:block;background:#fff;padding:8px;border-radius:8px}',
       '.wr-qr svg{width:100%;height:100%;display:block}',
+      '.wr-banner{display:flex;align-items:center;gap:8px;padding:8px 10px;margin:8px 10px 0;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-state-warn-bg,rgba(180,120,20,.12));color:var(--dsw-alias-state-warn-primary);font-size:12px}',
+      '.wr-bannerActions{margin-left:auto;flex:none}',
+      '.wr-filters{display:flex;align-items:center;gap:4px;margin-bottom:10px;flex-wrap:wrap}',
+      '.wr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:12px 8px;padding:2px 0 12px}',
+      '.wr-coverCard{display:flex;flex-direction:column;gap:6px;cursor:pointer;border:0;background:transparent;padding:0;text-align:left;color:inherit;font:inherit}',
+      '.wr-coverCard:hover .wr-coverHero{box-shadow:0 6px 16px rgba(0,0,0,.18)}',
+      '.wr-coverHero{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:4px 6px 6px 4px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 1px 4px rgba(0,0,0,.12);display:block}',
+      '.wr-coverHeroFlat{width:100%;aspect-ratio:3/4;border-radius:4px 6px 6px 4px;background:linear-gradient(165deg,var(--dsw-alias-bg-layer-2),var(--dsw-alias-bg-layer-1));box-shadow:0 1px 4px rgba(0,0,0,.08)}',
+      '.wr-coverMeta{min-width:0}',
+      '.wr-coverTitle{font-size:11px;line-height:14px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.wr-continue{padding:14px 14px 12px}',
+      '.wr-continueCover{width:72px;height:96px;object-fit:cover;border-radius:4px 8px 8px 4px;flex:none;background:var(--dsw-alias-bg-layer-1);box-shadow:0 4px 12px rgba(0,0,0,.16)}',
+      '.wr-continueCoverFlat{width:72px;height:96px;border-radius:4px 8px 8px 4px;flex:none;background:var(--dsw-alias-bg-layer-1)}',
+      '.wr-dock{flex:none;padding:6px 10px 10px;border-top:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}',
+      '.wr-dockRow{display:flex;align-items:center;gap:8px;margin-top:4px}',
     ].join('')
 
     // --- shared helpers ------------------------------------------------------
@@ -212,11 +227,13 @@ window.__ModuleLoader__.load({
     /** A cover that degrades to a flat block when the image cannot load. */
     function Cover(props) {
       const [failed, setFailed] = React.useState(false)
+      const imageClass = props.variant === 'hero' ? 'wr-coverHero' : props.variant === 'continue' ? 'wr-continueCover' : 'wr-cover'
+      const flatClass = props.variant === 'hero' ? 'wr-coverHeroFlat' : props.variant === 'continue' ? 'wr-continueCoverFlat' : 'wr-coverFlat'
       if (typeof props.src !== 'string' || props.src.length === 0 || failed) {
-        return h('div', { className: 'wr-coverFlat' })
+        return h('div', { className: flatClass })
       }
       return h('img', {
-        className: 'wr-cover',
+        className: imageClass,
         src: props.src,
         alt: '',
         loading: 'lazy',
@@ -322,21 +339,46 @@ window.__ModuleLoader__.load({
     /**
      * Which chapter a book should open at.
      *
-     * The chapter last read *here* wins. WeRead's own position only advances
-     * once a report lands, so leaning on it alone reopens every book at its
-     * first chapter — which reads as "it forgot where I was".
+     * Local and cloud positions are compared by recency. A report that has
+     * not landed yet still wins, so reopening a book does not jump backwards.
      *
      * @param positions - remembered positions, keyed by book id.
      * @param bookId - the book being opened.
-     * @param progressUid - the chapter WeRead's own progress points at.
+     * @param progress - WeRead's own progress record, or a chapterUid number.
      * @param firstUid - the first chapter with real text, as a last resort.
      */
-    function resumeChapterUid(positions, bookId, progressUid, firstUid) {
+    function resumeChapterUid(positions, bookId, progress, firstUid) {
       const remembered = positions === undefined || positions === null ? undefined : positions[String(bookId)]
-      const rememberedUid = remembered === undefined || remembered === null ? 0 : Number(remembered.chapterUid)
-      if (Number.isFinite(rememberedUid) && rememberedUid > 0) return rememberedUid
-      if (Number.isFinite(progressUid) && progressUid > 0) return progressUid
+      const localUid = remembered === undefined || remembered === null ? 0 : Number(remembered.chapterUid)
+      const localAt = remembered === undefined || remembered === null ? 0 : Number(remembered.updatedAt) || 0
+      const cloud =
+        progress !== null && typeof progress === 'object'
+          ? progress
+          : Number.isFinite(Number(progress)) && Number(progress) > 0
+            ? { chapterUid: Number(progress) }
+            : undefined
+      const cloudUid = Number(cloud?.chapterUid) || 0
+      const cloudAt = (Number(cloud?.updateTime) || 0) * 1000
+      if (localUid > 0 && (cloudUid <= 0 || localAt > cloudAt)) return localUid
+      if (cloudUid > 0) return cloudUid
       return Number.isFinite(firstUid) && firstUid > 0 ? firstUid : 0
+    }
+
+    /** Seconds → a short Chinese duration label. */
+    function formatReadingTime(seconds) {
+      const value = Math.max(0, Math.floor(Number(seconds) || 0))
+      if (value < 60) return value > 0 ? `${value} 秒` : ''
+      const minutes = Math.round(value / 60)
+      if (minutes < 60) return `${minutes} 分钟`
+      const hours = Math.floor(minutes / 60)
+      const rest = minutes % 60
+      return rest > 0 ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`
+    }
+
+    /** True when the panel should offer a one-tap re-login. */
+    function isSessionError(error) {
+      const code = error && error.code
+      return code === 'weread/session-expired' || code === 'weread/needs-cookie'
     }
 
     /** The first chapter with real text: catalogs open with 封面/版权 entries. */
@@ -354,14 +396,15 @@ window.__ModuleLoader__.load({
       if (props.state.status === 'error') {
         const error = props.state.error
         const code = error && error.code
+        const sessionExpired = code === 'weread/session-expired'
         const needsConfig =
           code === 'weread/needs-config' ||
           code === 'weread/bad-api-key' ||
-          code === 'weread/needs-cookie'
+          (code === 'weread/needs-cookie' && typeof props.onRelogin !== 'function')
         return h(
           'div',
           { className: 'wr-card' },
-          h('div', { className: 'wr-title' }, needsConfig ? '还没有配置微信读书' : '读取失败'),
+          h('div', { className: 'wr-title' }, sessionExpired ? '登录已过期' : needsConfig ? '还没有配置微信读书' : '读取失败'),
           h('p', { className: 'wr-error' }, errorText(error)),
           needsConfig
             ? h(
@@ -372,7 +415,14 @@ window.__ModuleLoader__.load({
                 h('li', null, '回到「在读」即可看到书架与进度'),
               )
             : null,
-          h('div', { className: 'wr-actions' }, h('button', { className: 'wr-btn', onClick: props.reload }, '重试')),
+          h(
+            'div',
+            { className: 'wr-actions' },
+            sessionExpired && typeof props.onRelogin === 'function'
+              ? h('button', { className: 'wr-btn wr-btnPrimary', onClick: props.onRelogin }, '重新登录')
+              : null,
+            h('button', { className: 'wr-btn', onClick: props.reload }, '重试'),
+          ),
         )
       }
       return props.render(props.state.value)
@@ -424,6 +474,7 @@ window.__ModuleLoader__.load({
           {
             state,
             reload,
+            onRelogin: props.onRelogin,
             render: (value) =>
               value.current === null
                 ? h(
@@ -458,31 +509,34 @@ window.__ModuleLoader__.load({
       const deepLink = detail === null || detail === undefined ? undefined : detail.deepLink
       const reading = progress !== undefined && progress !== null ? progress : undefined
       const chapters = detail !== null && detail !== undefined ? detail.chapters : []
-      const progressUid = reading !== undefined ? reading.chapterUid : 0
       const firstChapterUid = firstReadableChapterUid(chapters)
-      const chapterUid = resumeChapterUid(props.positions, book.bookId, progressUid, firstChapterUid)
+      const chapterUid = resumeChapterUid(props.positions, book.bookId, reading, firstChapterUid)
       const canReadInPanel = props.readerReady === true && chapterUid > 0
+      const timeLabel = formatReadingTime(reading !== undefined ? reading.recordReadingTime : book.readingTime)
       return h(
         'div',
-        { className: 'wr-card' },
+        { className: 'wr-card wr-continue' },
         h(
           'div',
           { className: 'wr-row' },
-          h(Cover, { src: detail !== null && detail !== undefined && detail.cover ? detail.cover : book.cover }),
+          h(Cover, {
+            src: detail !== null && detail !== undefined && detail.cover ? detail.cover : book.cover,
+            variant: 'continue',
+          }),
           h(
             'div',
             { style: { minWidth: 0, flex: 'auto' } },
+            h('div', { className: 'wr-faint' }, '继续阅读'),
             h('h3', { className: 'wr-title' }, `《${book.title}》`),
             book.author.length > 0 ? h('div', { className: 'wr-faint' }, book.author) : null,
             h(Progress, {
-              value: reading !== undefined ? reading.progress : 0,
-              hint: book.readUpdateDate !== undefined ? `上次阅读 ${book.readUpdateDate}` : undefined,
+              value: reading !== undefined ? reading.progress : book.progress || 0,
+              hint: [book.readUpdateDate !== undefined ? `上次 ${book.readUpdateDate}` : undefined, timeLabel ? `累计 ${timeLabel}` : undefined]
+                .filter(Boolean)
+                .join(' · '),
             }),
           ),
         ),
-        reading !== undefined && reading.recordReadingTime > 0
-          ? h('div', { className: 'wr-faint' }, `累计阅读 ${Math.round(reading.recordReadingTime / 60)} 分钟`)
-          : null,
         h(
           'div',
           { className: 'wr-actions' },
@@ -493,7 +547,7 @@ window.__ModuleLoader__.load({
                   className: 'wr-btn wr-btnPrimary',
                   onClick: () => props.onRead({ bookId: book.bookId, chapterUid, firstChapterUid, title: book.title }),
                 },
-                '在 DSH 里读',
+                '继续阅读',
               )
             : null,
           readerLink !== undefined
@@ -537,6 +591,7 @@ window.__ModuleLoader__.load({
           onRead: props.onRead,
           readerReady: props.readerReady,
           positions: props.positions,
+          onRelogin: props.onRelogin,
           onBack: () => setSelected(null),
         })
       }
@@ -546,6 +601,7 @@ window.__ModuleLoader__.load({
         h(Loaded, {
           state,
           reload,
+          onRelogin: props.onRelogin,
           render: (shelf) => h(ShelfList, { shelf, onSelect: setSelected, reload }),
         }),
       )
@@ -553,46 +609,114 @@ window.__ModuleLoader__.load({
 
     function ShelfList(props) {
       const shelf = props.shelf
+      const [filter, setFilter] = React.useState('all')
+      const [layout, setLayout] = React.useState('cover')
       if (shelf === null || shelf === undefined) return h('div', { className: 'wr-empty' }, '书架为空。')
       const books = shelf.books.slice().sort((left, right) => right.readUpdateTime - left.readUpdateTime)
       const albums = shelf.albums
+      const visible =
+        filter === 'finished'
+          ? books.filter((book) => book.finishReading === true)
+          : filter === 'reading'
+            ? books.filter((book) => book.finishReading !== true)
+            : books
+      const filters = [
+        ['all', '全部', books.length],
+        ['reading', '在读', books.filter((book) => book.finishReading !== true).length],
+        ['finished', '已读完', books.filter((book) => book.finishReading === true).length],
+      ]
+      const renderMeta = (book) => {
+        const timeLabel = formatReadingTime(book.readingTime)
+        const bits = []
+        if (Number.isFinite(Number(book.progress))) bits.push(`${Math.round(book.progress)}%`)
+        if (timeLabel) bits.push(timeLabel)
+        if (book.readUpdateDate !== undefined) bits.push(book.readUpdateDate)
+        return bits.join(' · ')
+      }
       return h(
         'div',
         null,
         h(
           'div',
-          { className: 'wr-row', style: { margin: '0 0 8px' } },
-          h(
-            'div',
-            { className: 'wr-faint' },
-            `共 ${shelf.totalCount} 项 · 电子书 ${books.length} · 有声书 ${albums.length}${shelf.hasMp ? ' · 含公众号' : ''}`,
-          ),
-          h('div', { className: 'wr-spacer' }),
-          h('button', { className: 'wr-btn', onClick: props.reload }, '刷新'),
-        ),
-        h(
-          'ul',
-          { className: 'wr-list' },
-          books.map((book) =>
+          { className: 'wr-filters' },
+          filters.map(([id, label, count]) =>
             h(
-              'li',
-              { key: book.bookId, className: 'wr-item', onClick: () => props.onSelect(book) },
-              h(
-                'div',
-                { className: 'wr-row' },
-                h(Cover, { src: book.cover }),
-                h(
-                  'div',
-                  { style: { minWidth: 0, flex: 'auto' } },
-                  h('div', { style: { fontWeight: 600 } }, `《${book.title}》`, book.finishReading ? h('span', { className: 'wr-tag' }, '已读完') : null),
-                  book.author.length > 0 ? h('div', { className: 'wr-faint' }, book.author) : null,
-                  book.readUpdateDate !== undefined ? h('div', { className: 'wr-faint' }, `最近阅读 ${book.readUpdateDate}`) : null,
-                ),
-              ),
+              'button',
+              { key: id, className: 'wr-chip', 'data-on': String(filter === id), onClick: () => setFilter(id) },
+              `${label} ${count}`,
             ),
           ),
+          h('div', { className: 'wr-spacer' }),
+          h(
+            'button',
+            {
+              className: 'wr-icon',
+              title: layout === 'cover' ? '列表' : '封面',
+              onClick: () => setLayout((value) => (value === 'cover' ? 'list' : 'cover')),
+            },
+            layout === 'cover'
+              ? h(
+                  'svg',
+                  { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, 'aria-hidden': true },
+                  h('path', { d: 'M3 5h10M3 11h10' }),
+                )
+              : h(
+                  'svg',
+                  { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, 'aria-hidden': true },
+                  h('rect', { x: 2.5, y: 2.5, width: 4.5, height: 4.5, rx: 0.8 }),
+                  h('rect', { x: 9, y: 2.5, width: 4.5, height: 4.5, rx: 0.8 }),
+                  h('rect', { x: 2.5, y: 9, width: 4.5, height: 4.5, rx: 0.8 }),
+                  h('rect', { x: 9, y: 9, width: 4.5, height: 4.5, rx: 0.8 }),
+                ),
+          ),
+          h('button', { className: 'wr-btn', onClick: props.reload }, '刷新'),
         ),
-        albums.length > 0
+        visible.length === 0
+          ? h('div', { className: 'wr-empty' }, filter === 'finished' ? '还没有读完的书。' : '这一栏是空的。')
+          : layout === 'cover'
+            ? h(
+                'div',
+                { className: 'wr-grid' },
+                visible.map((book) =>
+                  h(
+                    'button',
+                    { key: book.bookId, className: 'wr-coverCard', onClick: () => props.onSelect(book) },
+                    h(Cover, { src: book.cover, variant: 'hero' }),
+                    h(
+                      'div',
+                      { className: 'wr-coverMeta' },
+                      h('div', { className: 'wr-coverTitle' }, book.title),
+                      h('div', { className: 'wr-faint' }, renderMeta(book) || book.author),
+                    ),
+                  ),
+                ),
+              )
+            : h(
+                'ul',
+                { className: 'wr-list' },
+                visible.map((book) =>
+                  h(
+                    'li',
+                    { key: book.bookId, className: 'wr-item', onClick: () => props.onSelect(book) },
+                    h(
+                      'div',
+                      { className: 'wr-row' },
+                      h(Cover, { src: book.cover }),
+                      h(
+                        'div',
+                        { style: { minWidth: 0, flex: 'auto' } },
+                        h('div', { style: { fontWeight: 600 } }, book.title, book.finishReading ? h('span', { className: 'wr-tag' }, '已读完') : null),
+                        book.author.length > 0 ? h('div', { className: 'wr-faint' }, book.author) : null,
+                        h('div', { className: 'wr-faint' }, renderMeta(book)),
+                        Number.isFinite(Number(book.progress))
+                          ? h('div', { className: 'wr-progress' }, h('div', { className: 'wr-progressFill', style: { width: `${Math.max(0, Math.min(100, book.progress))}%` } }))
+                          : null,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+        albums.length > 0 && filter === 'all'
           ? h(
               'div',
               null,
@@ -605,7 +729,7 @@ window.__ModuleLoader__.load({
                   h(
                     'li',
                     { key: album.bookId, className: 'wr-item' },
-                    h('div', { style: { fontWeight: 600 } }, `《${album.title}》`),
+                    h('div', { style: { fontWeight: 600 } }, album.title),
                     h('div', { className: 'wr-faint' }, `${album.author}${album.trackCount > 0 ? ` · ${album.trackCount} 集` : ''}`),
                   ),
                 ),
@@ -625,6 +749,7 @@ window.__ModuleLoader__.load({
         h(Loaded, {
           state,
           reload,
+          onRelogin: props.onRelogin,
           render: (detail) =>
             h(
               'div',
@@ -653,10 +778,8 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'wr-actions' },
                 (() => {
-                  const progressUid =
-                    detail.progress !== undefined && detail.progress !== null ? detail.progress.chapterUid : 0
                   const firstChapterUid = firstReadableChapterUid(detail.chapters)
-                  const chapterUid = resumeChapterUid(props.positions, props.book.bookId, progressUid, firstChapterUid)
+                  const chapterUid = resumeChapterUid(props.positions, props.book.bookId, detail.progress, firstChapterUid)
                   if (props.readerReady !== true || chapterUid <= 0) return null
                   return h(
                     'button',
@@ -705,7 +828,7 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = React.useState(initial)
       const [state, reload] = useLoader(() => props.wrCall('notebooks'))
       if (selected !== null) {
-        return h(NotesDetail, { book: selected, wrCall: props.wrCall, onBack: () => setSelected(null) })
+        return h(NotesDetail, { book: selected, wrCall: props.wrCall, onBack: () => setSelected(null), onRelogin: props.onRelogin })
       }
       return h(
         'div',
@@ -713,6 +836,7 @@ window.__ModuleLoader__.load({
         h(Loaded, {
           state,
           reload,
+          onRelogin: props.onRelogin,
           render: (value) =>
             value.books.length === 0
               ? h('div', { className: 'wr-empty' }, '还没有任何划线或笔记。')
@@ -765,6 +889,7 @@ window.__ModuleLoader__.load({
         h(Loaded, {
           state,
           reload,
+          onRelogin: props.onRelogin,
           render: (value) =>
             value.chapters.length === 0
               ? h('div', { className: 'wr-empty' }, '这本书里没有找到划线或想法。')
@@ -810,6 +935,7 @@ window.__ModuleLoader__.load({
       const [showAppearance, setShowAppearance] = React.useState(false)
       const [message, setMessage] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
+      const [chapterRatio, setChapterRatio] = React.useState(0)
       // How far through the chapter the reader has scrolled. The host turns
       // this into the book's own position units, because it owns the catalog.
       // A ref, not state: scrolling must not re-render the whole chapter.
@@ -936,10 +1062,9 @@ window.__ModuleLoader__.load({
         if (layoutRef.current.boxes.length === 0 || stamp - layoutRef.current.at > 250) {
           layoutRef.current = { at: stamp, boxes: measureLayout() }
         }
-        positionRef.current = {
-          chapterUid,
-          ratio: measurePosition(element.scrollTop, layoutRef.current.boxes),
-        }
+        const ratio = measurePosition(element.scrollTop, layoutRef.current.boxes)
+        positionRef.current = { chapterUid, ratio }
+        setChapterRatio(ratio)
       }
 
       // The host is the source of truth; this only mirrors it back in, so a
@@ -986,6 +1111,48 @@ window.__ModuleLoader__.load({
         value === undefined
           ? `《${bookTitle}》`
           : `《${bookTitle || value.bookId}》 · ${value.title}${value.chapterIdx >= 0 ? `（${value.chapterIdx + 1}/${value.chapterCount}）` : ''}${readLabel}`
+
+      const turnPage = (direction) => {
+        const element = bodyRef.current
+        if (element === null) return
+        const page = Math.max(80, Math.floor(element.clientHeight * 0.92))
+        if (direction > 0) {
+          if (element.scrollTop + element.clientHeight >= element.scrollHeight - 12) {
+            if (value !== undefined && value.next !== undefined) setChapterUid(value.next.chapterUid)
+            return
+          }
+          element.scrollBy({ top: page, behavior: 'smooth' })
+        } else {
+          if (element.scrollTop <= 12) {
+            if (value !== undefined && value.previous !== undefined) setChapterUid(value.previous.chapterUid)
+            return
+          }
+          element.scrollBy({ top: -page, behavior: 'smooth' })
+        }
+      }
+
+      React.useEffect(() => {
+        const onKey = (event) => {
+          const tag = event.target && event.target.tagName
+          if (tag === 'INPUT' || tag === 'TEXTAREA') return
+          if (event.key === 'ArrowRight' || event.key === ' ') {
+            event.preventDefault()
+            turnPage(1)
+          } else if (event.key === 'ArrowLeft') {
+            event.preventDefault()
+            turnPage(-1)
+          }
+        }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+      }, [chapterUid, state.status, value && value.next && value.next.chapterUid, value && value.previous && value.previous.chapterUid])
+
+      const chapterPercent = Math.round(Math.max(0, Math.min(1, chapterRatio)) * 100)
+      const bookPercent =
+        value !== undefined && value.chapterCount > 0
+          ? Math.round(((Math.max(0, value.chapterIdx) + chapterRatio) / value.chapterCount) * 100)
+          : 0
+
       return h(
         'div',
         { className: 'wr-reader' },
@@ -1070,10 +1237,19 @@ window.__ModuleLoader__.load({
               lineHeight: appearance.lineHeight,
               fontFamily: FAMILY_STACKS[appearance.fontFamily] ?? 'inherit',
             },
+            onClick: (event) => {
+              const selection = typeof window.getSelection === 'function' ? String(window.getSelection()) : ''
+              if (selection.length > 0) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              const x = (event.clientX - rect.left) / rect.width
+              if (x < 0.28) turnPage(-1)
+              else if (x > 0.72) turnPage(1)
+            },
           },
           h(Loaded, {
             state,
             reload,
+            onRelogin: props.onRelogin,
             render: (chapter) => {
               if (chapter.paragraphs.length === 0) {
                 return h('div', { className: 'wr-empty' }, '这一章没有可显示的正文。')
@@ -1104,6 +1280,28 @@ window.__ModuleLoader__.load({
               )
             },
           }),
+        ),
+        h(
+          'div',
+          { className: 'wr-dock' },
+          h(
+            'div',
+            { className: 'wr-progress' },
+            h('div', { className: 'wr-progressFill', style: { width: `${chapterPercent}%` } }),
+          ),
+          h(
+            'div',
+            { className: 'wr-dockRow' },
+            h(
+              'div',
+              { className: 'wr-faint' },
+              value === undefined
+                ? '本章'
+                : `本章 ${chapterPercent}% · 全书约 ${bookPercent}%${value.chapterIdx >= 0 ? ` · ${value.chapterIdx + 1}/${value.chapterCount}` : ''}`,
+            ),
+            h('div', { className: 'wr-spacer' }),
+            h('span', { className: 'wr-faint' }, '← → / 空格翻页'),
+          ),
         ),
         message !== null
           ? h('p', { className: message.kind === 'ok' ? 'wr-ok' : 'wr-error', style: { padding: '0 10px 8px' } }, message.text)
@@ -1148,6 +1346,7 @@ window.__ModuleLoader__.load({
           wrOpenReader: props.wrOpenReader,
           onOpenNotes: props.onOpenNotes,
           onRead: props.onRead,
+          onRelogin: props.onRelogin,
           readerReady: props.readerReady,
           positions: props.positions,
           onBack: () => setSelected(null),
@@ -1186,6 +1385,7 @@ window.__ModuleLoader__.load({
           : h(Loaded, {
               state,
               reload,
+              onRelogin: props.onRelogin,
               render: (found) =>
                 found.results.length === 0
                   ? h('div', { className: 'wr-empty' }, `「${found.keyword}」没有结果。`)
@@ -1216,6 +1416,7 @@ window.__ModuleLoader__.load({
       const [message, setMessage] = React.useState(null)
       const [qr, setQr] = React.useState(null)
       const status = state.status === 'ready' ? state.value : undefined
+      const autoQr = props.autoQr === true
 
       const run = async (operation) => {
         setBusy(true)
@@ -1272,6 +1473,13 @@ window.__ModuleLoader__.load({
           reload()
           return value ? '已开启进度回写。' : '已关闭进度回写。'
         })
+
+      React.useEffect(() => {
+        if (autoQr !== true || qr !== null || busy) return undefined
+        startQr()
+        if (typeof props.onAutoQrConsumed === 'function') props.onAutoQrConsumed()
+        return undefined
+      }, [autoQr])
 
       return h(
         'div',
@@ -1371,15 +1579,29 @@ window.__ModuleLoader__.load({
     // --- 面板 -----------------------------------------------------------------
 
     function WereadTab(props) {
-      const wrCall = props.wrCall
+      const remoteCall = props.wrCall
       const wrOpenReader = props.wrOpenReader
       const [view, setView] = React.useState('now')
       const [notesBook, setNotesBook] = React.useState(undefined)
       const [nonce, setNonce] = React.useState(0)
       const [reader, setReader] = React.useState(null)
+      const [sessionExpired, setSessionExpired] = React.useState(false)
+      const [autoQr, setAutoQr] = React.useState(false)
       // Mirrors the host's remembered positions, so opening a book resumes it
       // even before the next status read lands.
       const [positions, setPositions] = React.useState({})
+      const wrCall = React.useCallback(
+        async (endpoint, payload, signal) => {
+          try {
+            const value = await remoteCall(endpoint, payload, signal)
+            return value
+          } catch (error) {
+            if (isSessionError(error) && endpoint !== 'status') setSessionExpired(true)
+            throw error
+          }
+        },
+        [remoteCall],
+      )
       // One local status read decides whether the in-panel reader is offered
       // at all, so the views never show a button that can only fail.
       const [statusState, reloadStatus] = useLoader(() =>
@@ -1391,6 +1613,13 @@ window.__ModuleLoader__.load({
       const readerReady =
         status !== undefined && (status.cookieConfigured === true || status.demoMode === true)
       const syncEnabled = status !== undefined && status.syncProgress === true
+
+      const relogin = () => {
+        setReader(null)
+        setView('settings')
+        setAutoQr(true)
+        setSessionExpired(false)
+      }
 
       React.useEffect(() => {
         if (status !== undefined && status.positions !== undefined) setPositions(status.positions)
@@ -1443,6 +1672,18 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { className: 'wr-root' },
+          sessionExpired
+            ? h(
+                'div',
+                { className: 'wr-banner' },
+                h('span', null, '登录已过期'),
+                h(
+                  'div',
+                  { className: 'wr-bannerActions' },
+                  h('button', { className: 'wr-btn wr-btnPrimary', onClick: relogin }, '重新登录'),
+                ),
+              )
+            : null,
           h(ReaderView, {
             wrCall,
             bookId: reader.bookId,
@@ -1452,13 +1693,14 @@ window.__ModuleLoader__.load({
             readerSettings: status === undefined ? undefined : status.reader,
             onAppearance: saveAppearance,
             onChapter: (uid) => remember(reader.bookId, uid),
+            onRelogin: relogin,
             onBack: () => setReader(null),
           }),
         )
       }
 
       let body
-      if (typeof wrCall !== 'function') {
+      if (typeof remoteCall !== 'function') {
         body = h('div', { className: 'wr-body' }, h('p', { className: 'wr-error' }, '客户端没有拿到宿主通道，请重新加载页面。'))
       } else if (view === 'shelf') {
         body = h(ShelfView, {
@@ -1467,6 +1709,7 @@ window.__ModuleLoader__.load({
           wrOpenReader,
           onOpenNotes: openNotes,
           onRead: openReader,
+          onRelogin: relogin,
           readerReady,
           positions,
           refresh: false,
@@ -1478,19 +1721,27 @@ window.__ModuleLoader__.load({
           wrOpenReader,
           onOpenNotes: openNotes,
           onRead: openReader,
+          onRelogin: relogin,
           readerReady,
           positions,
         })
       } else if (view === 'notes') {
-        body = h(NotesView, { key: `notes${nonce}`, wrCall, initialBook: notesBook })
+        body = h(NotesView, { key: `notes${nonce}`, wrCall, initialBook: notesBook, onRelogin: relogin })
       } else if (view === 'settings') {
-        body = h(SettingsView, { key: `settings${nonce}`, wrCall, wrOpenReader })
+        body = h(SettingsView, {
+          key: `settings${nonce}`,
+          wrCall,
+          wrOpenReader,
+          autoQr,
+          onAutoQrConsumed: () => setAutoQr(false),
+        })
       } else {
         body = h(NowView, {
           key: `now${nonce}`,
           wrCall,
           wrOpenReader,
           onRead: openReader,
+          onRelogin: relogin,
           readerReady,
           positions,
           wrGoNotes: openNotes,
@@ -1519,6 +1770,18 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        sessionExpired
+          ? h(
+              'div',
+              { className: 'wr-banner' },
+              h('span', null, '登录已过期，书架和阅读需要重新登录。'),
+              h(
+                'div',
+                { className: 'wr-bannerActions' },
+                h('button', { className: 'wr-btn wr-btnPrimary', onClick: relogin }, '重新登录'),
+              ),
+            )
+          : null,
         body,
       )
     }
@@ -1547,6 +1810,8 @@ window.__ModuleLoader__.load({
         creditReadingTime,
         isOnScreen,
         resumeChapterUid,
+        formatReadingTime,
+        isSessionError,
         Loaded,
         Progress,
         Cover,
@@ -1611,7 +1876,7 @@ window.__ModuleLoader__.load({
                     id: 'open',
                     order: 40,
                     title: () => '微信读书',
-                    description: () => '书架、书城与章节阅读',
+                    description: () => '安静封面书架与章节阅读',
                     icon: WereadGuideIcon,
                   },
                 ],
