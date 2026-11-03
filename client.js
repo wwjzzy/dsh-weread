@@ -35,6 +35,7 @@ window.__ModuleLoader__.load({
       '.wr-spacer{flex:auto}',
       '.wr-icon{width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-sm,6px);cursor:pointer}',
       '.wr-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+      '::highlight(weread-kept){background-color:rgba(255,196,0,.38);color:inherit}',
       '.wr-body{flex:auto;min-height:0;overflow:auto;padding:10px}',
       '.wr-muted{color:var(--dsw-alias-label-secondary)}',
       '.wr-faint{color:var(--dsw-alias-label-secondary);font-size:11px}',
@@ -1135,6 +1136,8 @@ window.__ModuleLoader__.load({
         const onKey = (event) => {
           const tag = event.target && event.target.tagName
           if (tag === 'INPUT' || tag === 'TEXTAREA') return
+          if (event.target && (event.target.isContentEditable || (event.target.closest && event.target.closest('[contenteditable="true"]')))) return
+          if (document.activeElement && (document.activeElement.isContentEditable || ['INPUT','TEXTAREA'].includes(document.activeElement.tagName))) return
           if (event.key === 'ArrowRight' || event.key === ' ') {
             event.preventDefault()
             turnPage(1)
@@ -1144,7 +1147,56 @@ window.__ModuleLoader__.load({
           }
         }
         document.addEventListener('keydown', onKey)
-        return () => document.removeEventListener('keydown', onKey)
+        // [patch] 记住用户在正文里选中的文字：切到聊天框时浏览器会清除选区，
+        // 所以必须在选区还在时把它存到宿主，供 weread_selection 工具读取。
+        let selTimer = null
+        const onSelection = () => {
+          let text = ''
+          try {
+            const sel = typeof document.getSelection === 'function' ? document.getSelection() : null
+            text = sel === null ? '' : String(sel.toString() || '')
+          } catch {
+            text = ''
+          }
+          const trimmed = text.trim()
+          if (trimmed.length < 2) return
+          // [patch] 选区一旦失焦就被浏览器清掉；用 CSS Custom Highlight 另画一层
+          // 持久高亮，视觉上"选中还在"，用户切到输入框打字时能看到自己选的是哪段。
+          try {
+            // 注意：本文件第 30 行有一个局部常量也叫 CSS（样式字符串数组），
+            // 直接写 CSS.highlights 会被它遮蔽，必须走 globalThis。
+            const g = typeof globalThis !== 'undefined' ? globalThis : undefined
+            const cssApi = g === undefined ? undefined : g.CSS
+            const HighlightCtor = g === undefined ? undefined : g.Highlight
+            const win = g === undefined ? undefined : g.window
+            if (cssApi !== undefined && cssApi !== null && cssApi.highlights && typeof HighlightCtor === 'function' && win && win.getSelection) {
+              const live = win.getSelection()
+              if (live !== null && live.rangeCount > 0 && !live.isCollapsed) {
+                cssApi.highlights.set('weread-kept', new HighlightCtor(live.getRangeAt(0).cloneRange()))
+              }
+            }
+          } catch {
+            /* Highlight API 不可用时静默降级 */
+          }
+          if (selTimer !== null) clearTimeout(selTimer)
+          selTimer = setTimeout(() => {
+            selTimer = null
+            void props
+              .wrCall('selection', {
+                text: trimmed.slice(0, 4000),
+                chapterTitle: value && value.title ? String(value.title) : '',
+                chapterUid: value && Number.isFinite(value.chapterUid) ? value.chapterUid : 0,
+                bookId: value && value.bookId ? String(value.bookId) : '',
+              })
+              .catch(() => {})
+          }, 350)
+        }
+        document.addEventListener('selectionchange', onSelection)
+        return () => {
+          document.removeEventListener('keydown', onKey)
+          document.removeEventListener('selectionchange', onSelection)
+          if (selTimer !== null) clearTimeout(selTimer)
+        }
       }, [chapterUid, state.status, value && value.next && value.next.chapterUid, value && value.previous && value.previous.chapterUid])
 
       const chapterPercent = Math.round(Math.max(0, Math.min(1, chapterRatio)) * 100)
@@ -1409,9 +1461,12 @@ window.__ModuleLoader__.load({
       )
     }
 
+    const API_KEY_HELP_URL = 'https://weread.qq.com/r/weread-skills'
+
     function SettingsView(props) {
       const [state, reload] = useLoader(() => props.wrCall('status'))
       const [cookie, setCookie] = React.useState('')
+      const [apiKey, setApiKey] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [message, setMessage] = React.useState(null)
       const [qr, setQr] = React.useState(null)
@@ -1459,6 +1514,24 @@ window.__ModuleLoader__.load({
         })
       }
 
+      const saveApiKey = () => {
+        const value = apiKey.trim()
+        if (value.length === 0) {
+          setMessage({ kind: 'error', text: '请先粘贴 API Key。' })
+          return
+        }
+        if (!value.startsWith('wrk-')) {
+          setMessage({ kind: 'error', text: 'API Key 应以 wrk- 开头。' })
+          return
+        }
+        return run(async () => {
+          await props.wrCall('configure', { apiKey: value })
+          setApiKey('')
+          reload()
+          return '已保存 API Key。'
+        })
+      }
+
       const logout = () =>
         run(async () => {
           await props.wrCall('logout')
@@ -1499,6 +1572,11 @@ window.__ModuleLoader__.load({
                   status.cookieConfigured
                     ? h('li', { className: 'wr-faint' }, `Cookie：${status.cookieNames.join(', ')}`)
                     : null,
+                  h(
+                    'li',
+                    { className: 'wr-faint' },
+                    `API Key：${status.apiKeyConfigured ? `已配置 ${status.apiKeyHint}${status.apiKeyLooksValid === false ? '（格式可疑）' : ''}` : '未配置（只能读正文，读不到划线/想法）'}`,
+                  ),
                   h('li', { className: 'wr-faint' }, `数据目录：${status.dataDir}`),
                 ),
           h(
@@ -1526,6 +1604,46 @@ window.__ModuleLoader__.load({
                 dangerouslySetInnerHTML: { __html: qr.qrSvg },
               })
             : null,
+        ),
+        h(
+          'div',
+          { className: 'wr-card' },
+          h('h3', { className: 'wr-title' }, 'API Key（划线 / 想法 / 笔记）'),
+          h(
+            'p',
+            { className: 'wr-faint' },
+            '划线、想法与笔记走官方 Agent Gateway，需要单独的 API Key；和上面的扫码登录是两套独立凭据，缺它只能读正文。',
+          ),
+          h(
+            'div',
+            { className: 'wr-field' },
+            h('input', {
+              className: 'wr-input',
+              type: 'password',
+              value: apiKey,
+              placeholder: 'wrk-…',
+              spellCheck: false,
+              autoComplete: 'off',
+              onChange: (event) => setApiKey(event.target.value),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'wr-actions' },
+            h('button', { className: 'wr-btn wr-btnPrimary', disabled: busy, onClick: saveApiKey }, busy ? '保存中…' : '保存 API Key'),
+            h(
+              'a',
+              {
+                className: 'wr-btn',
+                href: API_KEY_HELP_URL,
+                target: '_blank',
+                rel: 'noreferrer',
+                style: { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' },
+              },
+              '去获取 API Key ↗',
+            ),
+          ),
+          h('p', { className: 'wr-faint' }, `在 ${API_KEY_HELP_URL} 用微信读书账号登录后创建。`),
         ),
         h(
           'div',
