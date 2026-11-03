@@ -1,8 +1,8 @@
 {
   "name": "dsh-weread",
-  "version": "1.7.0",
+  "version": "1.9.1",
   "type": "module",
-  "description": "WeChat Reading (WeRead) right-sidebar bookshelf and chapter reader for DeepSeek Harness: QR or Cookie login, store search, resume reading, and weread_shelf / weread_search / weread_book / weread_chapter agent tools",
+  "description": "WeChat Reading (WeRead) right-sidebar bookshelf and chapter reader for DeepSeek Harness: QR or Cookie login, store search, cloud progress/reading-time sync, resume reading, and weread_shelf / weread_search / weread_book / weread_chapter agent tools",
   "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",
